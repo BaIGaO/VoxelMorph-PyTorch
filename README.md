@@ -2,7 +2,7 @@
 1. fixed normalized cross correlation loss crash issue for 2D images.
 2. fixed smoothing loss input incorrect parameters.
 3. Optimized the model training script.
-
+4. added jacobian loss for deformation field to contrain the local deformation.
 
 ---
 # VoxelMorph-PyTorch
