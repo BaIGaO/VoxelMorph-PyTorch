@@ -1,3 +1,10 @@
+# Change log
+1. fixed normalized cross correlation loss crash issue for 2D images.
+2. fixed smoothing loss input incorrect parameters.
+3. Optimized the model training script.
+
+
+---
 # VoxelMorph-PyTorch
 
 An unofficial PyTorch implementation of VoxelMorph- An unsupervised 3D deformable image registration method.
