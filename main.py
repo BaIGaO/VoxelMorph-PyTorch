@@ -58,7 +58,7 @@ class VoxelMorphTrainer:
         registered_image, deform_field = self.model(moving_batch, fixed_batch)
         
         loss = vm2d.combined_loss(
-            registered_image, fixed_batch, deform_field,n=25,
+            registered_image, fixed_batch, deform_field,n=9,
             alpha=alpha, lambda_reg=lambda_reg
         )
         
@@ -81,7 +81,7 @@ class VoxelMorphTrainer:
             registered_image, deform_field = self.model(moving_batch, fixed_batch)
             
             loss = vm2d.combined_loss(
-                registered_image, fixed_batch, deform_field,n=25,
+                registered_image, fixed_batch, deform_field,n=9,
                 alpha=alpha, lambda_reg=lambda_reg
             )
             dice_score = 1 - vm2d.dice_loss(registered_image, fixed_batch)
@@ -198,7 +198,7 @@ def visualize_history(history, save_path='training_history.png'):
 
 def main():
     # --- Configuration ---
-    DATA_DIR = './images/'
+    DATA_DIR = './fire-fundus-image-registration-dataset/'
     NUM_CHANNELS = 3 # For RGB images
     PARAMS = {
         'batch_size': 8, # Adjust based on your GPU memory
