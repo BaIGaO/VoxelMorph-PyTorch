@@ -3,16 +3,17 @@ import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+# from torch.autograd import Variable # Variable is deprecated.
 import numpy as np
 
-# ---  Define device once ---
+# --- Modern Practice: Define device once ---
 torch.manual_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if device.type == 'cuda':
     torch.cuda.manual_seed(42)
 
 #================================================================================
-# 1. ATTENTION MODULES
+# 1. ATTENTION MODULES (Corrected)
 #================================================================================
 class ChannelAttention(nn.Module):
     def __init__(self, in_channels, reduction_ratio=16):
@@ -111,7 +112,7 @@ class ASPP(nn.Module):
         return out
 
 #================================================================================
-# 3. UNET ARCHITECTURE
+# 3. UNET ARCHITECTURE (Refactored)
 #================================================================================
 
 # --- New Block to correctly apply attention ---
@@ -167,7 +168,7 @@ class UNet(nn.Module):
         return nn.Sequential(
             ResidualBlock(in_channels, mid_channels),
             nn.Dropout2d(0.1),
-            nn.Conv2d(mid_channels, out_channels, kernel_size=1) # Use 1x1 conv for final mapping
+            nn.Conv2d(mid_channels, out_channels, kernel_size=1, bias=False) # Use 1x1 conv for final mapping
         )
 
     def crop_and_concat(self, upsampled, bypass):
@@ -201,7 +202,7 @@ class UNet(nn.Module):
         return d1
 
 #================================================================================
-# 4. SPATIAL TRANSFORMER
+# 4. SPATIAL TRANSFORMER (Refactored for Simplicity and Channels-First)
 #================================================================================
 
 class SpatialTransformation(nn.Module):
@@ -241,7 +242,7 @@ class SpatialTransformation(nn.Module):
         return warped_image
 
 #================================================================================
-# 5. MAIN VOXELMORPH MODEL 
+# 5. MAIN VOXELMORPH MODEL (Refactored for Simplicity)
 #================================================================================
 class VoxelMorph2d(nn.Module):
     def __init__(self, in_channels):
@@ -267,8 +268,63 @@ class VoxelMorph2d(nn.Module):
         return registered_image, deformation_field
 
 #================================================================================
-# 6. LOSS FUNCTIONS 
+# 6. LOSS FUNCTIONS (Cleaned Up)
 #================================================================================
+
+# In voxelmorph2d.py
+
+def jacobian_determinant(deformation_field):
+    """
+    Calculates the Jacobian determinant of a 2D deformation field.
+    A bug in the previous version's slicing has been corrected here.
+
+    deformation_field: (B, 2, H, W) tensor, where C=0 is dx and C=1 is dy.
+    """
+    # Extract the x and y displacement fields. Shape: [B, H, W]
+    dx = deformation_field[:, 0, :, :]
+    dy = deformation_field[:, 1, :, :]
+
+    # Calculate gradients using central differences.
+    # The slicing now correctly uses 3 indices for the 3D tensors.
+    
+    # Gradient in x-direction (change in width)
+    # We crop the height dimension to match shapes after calculating gradients.
+    J_dx_dx = dx[:, 1:-1, 2:] - dx[:, 1:-1, :-2]
+    J_dy_dx = dy[:, 1:-1, 2:] - dy[:, 1:-1, :-2]
+
+    # Gradient in y-direction (change in height)
+    # We crop the width dimension to match shapes.
+    J_dx_dy = dx[:, 2:, 1:-1] - dx[:, :-2, 1:-1]
+    J_dy_dy = dy[:, 2:, 1:-1] - dy[:, :-2, 1:-1]
+
+    # The central difference is over a 2-pixel span, so we divide by 2.
+    J_dx_dx /= 2.0
+    J_dy_dx /= 2.0
+    J_dx_dy /= 2.0
+    J_dy_dy /= 2.0
+    
+    # The Jacobian of the transformation T(p) = p + u(p) is J = I + Du
+    # determinant is (1 + dux/dx)(1 + duy/dy) - (dux/dy)(duy/dx)
+    determinant = (1.0 + J_dx_dx) * (1.0 + J_dy_dy) - J_dx_dy * J_dy_dx
+    
+    return determinant
+    
+    return determinant
+
+
+def jacobian_regularization_loss(deformation_field):
+    """
+    惩罚雅可比行列式偏离1的情况
+    """
+    det = jacobian_determinant(deformation_field)
+    
+    # 惩罚偏离1的平方误差
+    loss = torch.mean((det - 1.0)**2)
+    
+    # 也可以额外惩罚负的行列式，防止拓扑翻转
+    neg_det_loss = torch.sum(F.relu(-det))
+    
+    return loss + neg_det_loss        
 
 def normalized_cross_correlation(I, J, n=9, eps=1e-5):
     # Assumes I, J are [B, C, H, W] and float tensors
@@ -318,17 +374,21 @@ def dice_loss(pred, target, eps=1e-5):
     dice_score = torch.mean((intersection + eps) / (union + eps))
     return 1 - dice_score
 
-def combined_loss(registered_image, fixed_image, deformation_field, n=9, lambda_reg=0.01, alpha=0.5):
+def combined_loss(registered_image, fixed_image, deformation_field, n=9, lambda_reg=0.01, alpha=0.5, lambda_jacobian=0.8):
     # Similarity losses
     ncc = normalized_cross_correlation(registered_image, fixed_image, n=n)
-    mse = mse_loss(registered_image, fixed_image)
+    #mse = mse_loss(registered_image, fixed_image)
     dice = dice_loss(registered_image, fixed_image) # Assumes images are normalized to be like segmentation masks
     
     # Regularization loss
     reg_loss = gradient_loss(deformation_field)
+
+    # Jacobian loss
+    jacobian_loss = jacobian_regularization_loss(deformation_field)
     
     # Combine losses
-    similarity_loss = (1 - alpha) * (ncc + mse) + alpha * dice
-    total_loss = similarity_loss + lambda_reg * reg_loss
+    similarity_loss = (1 - alpha) * ncc + alpha * dice
+    #similarity_loss = (1 - alpha) * (ncc + mse) + alpha * dice
+    total_loss = similarity_loss + lambda_reg * reg_loss + lambda_jacobian * jacobian_loss
     
     return total_loss
